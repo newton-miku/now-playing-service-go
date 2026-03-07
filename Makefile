@@ -12,8 +12,8 @@ ASSET_DIR = web
 # 图标目录
 ICO_DIR = ico
 
-# 日期命令
-BUILD_TIME ?= $(shell TZ='Asia/Shanghai' date +%Y-%m-%d\ %H:%M:%S)
+# 日期命令 - 跨平台兼容
+BUILD_TIME ?= $(shell TZ=UTC-8 date +%Y-%m-%d\ %H:%M:%S 2>/dev/null || TZ=Asia/Shanghai date +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date +%Y-%m-%d\ %H:%M:%S)
 DATE_CMD = date +%Y%m%d
 
 # 版本号生成（使用跨平台日期命令）
@@ -25,6 +25,10 @@ GOBUILD_WINDOWS=CGO_ENABLED=0 go build -trimpath -ldflags '-X "github.com/newton
 RC_FILE=main.rc
 SYSO_FILE_386=main_windows_386.syso
 SYSO_FILE_AMD64=main_windows_amd64.syso
+
+# 检测可用的 windres 命令
+WINDRES_386=$(shell which i686-w64-mingw32-windres 2>/dev/null || which windres 2>/dev/null || echo windres)
+WINDRES_AMD64=$(shell which x86_64-w64-mingw32-windres 2>/dev/null || which windres 2>/dev/null || echo windres)
 
 
 # ==============================================================================
@@ -77,10 +81,10 @@ linux-mips64le:
 
 # Windows 图标资源编译
 $(SYSO_FILE_386): $(RC_FILE)
-	windres -i $(RC_FILE) -o $@ -O coff -F pe-i386
+	$(WINDRES_386) -i $(RC_FILE) -o $@ -O coff -F pe-i386
 
 $(SYSO_FILE_AMD64): $(RC_FILE)
-	windres -i $(RC_FILE) -o $@ -O coff -F pe-x86-64
+	$(WINDRES_AMD64) -i $(RC_FILE) -o $@ -O coff -F pe-x86-64
 
 windows-386: $(SYSO_FILE_386)
 	GOARCH=386 GOOS=windows $(GOBUILD_WINDOWS) -o $(BINDIR)/$(NAME)-$@.exe
@@ -105,16 +109,21 @@ $(gz_releases): %.gz : %
 	# 清理临时文件
 	rm -rf $(BINDIR)/release
 
-# 正确的zip规则 - 包含配置和资源目录
+# 正确的zip规则 - 跨平台兼容（优先使用7z，其次powershell，最后zip）
 $(zip_releases): %.zip : %
 	# 创建临时目录用于打包
 	mkdir -p $(BINDIR)/release/$(NAME)-$(basename $@)
 	mv $(BINDIR)/$(NAME)-$(basename $@).exe $(BINDIR)/release/$(NAME)-$(basename $@)/
-	-robocopy $(CONF_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/$(CONF_DIR) /E 2>/dev/null & exit 0
-	-robocopy $(ASSET_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/$(ASSET_DIR) /E 2>/dev/null & exit 0
-	-robocopy $(ICO_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/$(ICO_DIR) /E 2>/dev/null & exit 0
-	# 创建压缩包
-	cd $(BINDIR)/release && powershell -Command "Compress-Archive -Path $(NAME)-$(basename $@) -DestinationPath ../$(NAME)-$(basename $@)-$(VERSION).zip -Force"
+	# 复制资源文件（跨平台方式）
+	-cp -r $(CONF_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/ 2>/dev/null || true
+	-cp -r $(ASSET_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/ 2>/dev/null || true
+	-cp -r $(ICO_DIR) $(BINDIR)/release/$(NAME)-$(basename $@)/ 2>/dev/null || true
+	# 创建压缩包（尝试多种方法）
+	cd $(BINDIR)/release && ( \
+		(which 7z 2>/dev/null && 7z a -tzip ../$(NAME)-$(basename $@)-$(VERSION).zip $(NAME)-$(basename $@)) || \
+		(which powershell 2>/dev/null && powershell -Command "Compress-Archive -Path $(NAME)-$(basename $@) -DestinationPath ../$(NAME)-$(basename $@)-$(VERSION).zip -Force") || \
+		(which zip 2>/dev/null && zip -r ../$(NAME)-$(basename $@)-$(VERSION).zip $(NAME)-$(basename $@)) \
+	)
 	# 清理临时文件
 	rm -rf $(BINDIR)/release
 
