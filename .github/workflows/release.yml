@@ -1,0 +1,51 @@
+name: Release Client
+
+on:
+  push:
+    tags:
+      - 'client-v*'
+      - 'v*'
+
+defaults:
+  run:
+    working-directory: now-playing-service-go
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          check-latest: true
+          cache-dependency-path: now-playing-service-go/go.sum
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Build all platforms
+        run: |
+          VERSION=$(git describe --tags --always)
+          BUILD_TIME=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')
+          export VERSION BUILD_TIME
+
+          # Build using make
+          make releases
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: now-playing-service-go/bin/*.tar.gz,now-playing-service-go/bin/*.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-pre') || contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
