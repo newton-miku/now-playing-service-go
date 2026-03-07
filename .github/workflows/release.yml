@@ -25,32 +25,35 @@ jobs:
           go-version: '1.21'
           check-latest: true
 
-      - name: Install MinGW-w64
-        uses: egor-tensin/setup-mingw@v2
+      - name: Set up MinGW-w64
+        uses: egor-tensin/setup-mingw@v3
         with:
           platform: x64
+
+      - name: Verify GCC
+        shell: cmd
+        run: |
+          gcc --version
 
       - name: Install dependencies
         run: go mod download
 
-      - name: Build
-        shell: bash
+      - name: Build and package using batch script
+        shell: cmd
         run: |
-          VERSION=$(git describe --tags --always 2>/dev/null || echo "unknown")
-          BUILD_TIME=$(TZ=UTC-8 date +'%Y-%m-%d %H:%M:%S')
-          export GOOS=windows
-          export GOARCH=${{ matrix.goarch }}
-          export CGO_ENABLED=1
-          export CC=x86_64-w64-mingw32-gcc
-          export CXX=x86_64-w64-mingw32-g++
-          LDFLAGS="-X \"github.com/newton-miku/now-playing-service-go/tools.Version=${VERSION}\" -X \"github.com/newton-miku/now-playing-service-go/tools.BuildTime=${BUILD_TIME}\" -w -s -H=windowsgui"
-          go build -trimpath -ldflags "${LDFLAGS}" -o bin/now-playing-windows-${{ matrix.goarch }}.exe
+          call build.bat ${{ matrix.goarch }} --package
 
-      - name: Upload artifact
+      - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.goarch }}
+          name: windows-exe-${{ matrix.goarch }}
           path: bin/now-playing-windows-${{ matrix.goarch }}.exe
+
+      - name: Upload zip package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip-${{ matrix.goarch }}
+          path: bin/now-playing-windows-${{ matrix.goarch }}-*.zip
 
   release:
     name: Release
@@ -64,32 +67,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download Windows artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: bin/
+          path: artifacts/
 
-      - name: Create zip packages
-        run: |
-          sudo apt-get update && sudo apt-get install -y p7zip-full
-          VERSION=$(git describe --tags --always)
-          mkdir -p release
-
-          # Move and zip Windows amd64
-          if [ -f bin/windows-amd64/now-playing-windows-amd64.exe ]; then
-            mkdir -p release/now-playing-windows-amd64
-            mv bin/windows-amd64/now-playing-windows-amd64.exe release/now-playing-windows-amd64/
-            # Copy config/web/ico if they exist
-            cp -r config release/now-playing-windows-amd64/ 2>/dev/null || true
-            cp -r web release/now-playing-windows-amd64/ 2>/dev/null || true
-            cp -r ico release/now-playing-windows-amd64/ 2>/dev/null || true
-            cd release && 7z a -tzip ../bin/now-playing-windows-amd64-${VERSION}.zip now-playing-windows-amd64 && cd ..
-          fi
+      - name: Display structure of downloaded files
+        run: ls -R artifacts/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: bin/*.zip
+          files: |
+            artifacts/windows-zip-*/now-playing-windows-*.zip
+            artifacts/windows-exe-*/now-playing-windows-*.exe
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, '-pre') || contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
