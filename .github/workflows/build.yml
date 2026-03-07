@@ -3,12 +3,8 @@ name: Build Client
 on:
   push:
     branches: [ main, master ]
-    paths:
-      - 'now-playing-service-go/**'
   pull_request:
     branches: [ main, master ]
-    paths:
-      - 'now-playing-service-go/**'
 
 defaults:
   run:
