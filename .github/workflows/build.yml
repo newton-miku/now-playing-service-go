@@ -7,68 +7,12 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goarch: [amd64, arm64]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-          check-latest: true
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Build
-        run: make linux-${{ matrix.goarch }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: now-playing-linux-${{ matrix.goarch }}
-          path: bin/now-playing-linux-${{ matrix.goarch }}
-
-  build-darwin:
-    name: Build macOS
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        goarch: [amd64, arm64]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-          check-latest: true
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Build
-        run: make darwin-${{ matrix.goarch }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: now-playing-darwin-${{ matrix.goarch }}
-          path: bin/now-playing-darwin-${{ matrix.goarch }}
-
   build-windows:
     name: Build Windows
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     strategy:
       matrix:
-        goarch: [386, amd64]
+        goarch: [amd64]
 
     steps:
       - uses: actions/checkout@v4
@@ -79,50 +23,29 @@ jobs:
           go-version: '1.21'
           check-latest: true
 
-      - name: Install MinGW-w64 and 7zip
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64 p7zip-full
+      - name: Install MinGW-w64
+        uses: egor-tensin/setup-mingw@v2
+        with:
+          platform: x64
 
       - name: Install dependencies
         run: go mod download
 
       - name: Build
-        run: make windows-${{ matrix.goarch }}
+        shell: bash
+        run: |
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "unknown")
+          BUILD_TIME=$(TZ=UTC-8 date +'%Y-%m-%d %H:%M:%S')
+          export GOOS=windows
+          export GOARCH=${{ matrix.goarch }}
+          export CGO_ENABLED=1
+          export CC=x86_64-w64-mingw32-gcc
+          export CXX=x86_64-w64-mingw32-g++
+          LDFLAGS="-X \"github.com/newton-miku/now-playing-service-go/tools.Version=${VERSION}\" -X \"github.com/newton-miku/now-playing-service-go/tools.BuildTime=${BUILD_TIME}\" -w -s -H=windowsgui"
+          go build -trimpath -ldflags "${LDFLAGS}" -o bin/now-playing-windows-${{ matrix.goarch }}.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: now-playing-windows-${{ matrix.goarch }}
           path: bin/now-playing-windows-${{ matrix.goarch }}.exe
-
-  build-releases:
-    name: Build Release Packages
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-          check-latest: true
-
-      - name: Install MinGW-w64 and 7zip
-        run: sudo apt-get update && sudo apt-get install -y mingw-w64 p7zip-full
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Build all release packages
-        run: make releases
-
-      - name: Upload release packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-packages
-          path: |
-            bin/*.tar.gz
-            bin/*.zip
