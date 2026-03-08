@@ -7,7 +7,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -65,6 +67,51 @@ func SetLogLevel(level int) {
 	}
 }
 
+// isGUIApp returns true if stdout is not available (GUI application)
+func isGUIApp() bool {
+	// Check if stdout is available (not a GUI app)
+	_, err := os.Stdout.Stat()
+	return err != nil
+}
+
+// openLogFileWithShareMode opens a log file with Windows file sharing mode
+// This allows other processes to read the log file while it's being written
+func openLogFileWithShareMode(path string) (*os.File, error) {
+	if runtime.GOOS == "windows" {
+		// Use Windows-specific CreateFile to set share mode
+		pathPtr, err := syscall.UTF16PtrFromString(path)
+		if err != nil {
+			return nil, err
+		}
+
+		const (
+			FILE_APPEND_DATA   = 0x0004
+			FILE_SHARE_READ    = 0x00000001
+			FILE_SHARE_WRITE   = 0x00000002
+			OPEN_ALWAYS        = 4
+			FILE_ATTRIBUTE_NORMAL = 0x00000080
+		)
+
+		handle, err := syscall.CreateFile(
+			pathPtr,
+			FILE_APPEND_DATA,
+			FILE_SHARE_READ|FILE_SHARE_WRITE,
+			nil,
+			OPEN_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL,
+			0,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return os.NewFile(uintptr(handle), path), nil
+	}
+
+	// For non-Windows platforms, use standard os.OpenFile
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+}
+
 // Init initializes the logger with file output
 func Init(appName string) error {
 	var initErr error
@@ -95,15 +142,19 @@ func initLogger(appName string) error {
 	// Rotate logs if needed
 	rotateLogs()
 
-	// Open log file
-	logFile, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	// Open log file with proper sharing mode for Windows
+	// This allows other processes to read the log file while it's being written
+	logFile, err = openLogFileWithShareMode(logPath)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 
-	// Create multi-writer: file + stdout
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	logger = log.New(multiWriter, "", log.LstdFlags|log.Lmicroseconds)
+	// Create writer: file only for GUI apps, file + stdout for console apps
+	var writer io.Writer = logFile
+	if !isGUIApp() {
+		writer = io.MultiWriter(os.Stdout, logFile)
+	}
+	logger = log.New(writer, "", log.LstdFlags|log.Lmicroseconds)
 
 	Info("Logger initialized")
 	Info("Log file:", logPath)
