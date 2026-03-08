@@ -29,8 +29,8 @@ var (
 	webviewInstance realWebview.WebView
 	isRunning       bool
 	mu              sync.Mutex
-	initDone        bool
 	showChan        chan *Config
+	quitChan        chan struct{}
 )
 
 // Config holds webview configuration
@@ -62,15 +62,6 @@ func Show(config *Config) error {
 		config = DefaultConfig()
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	// Initialize on first call
-	if !initDone {
-		showChan = make(chan *Config, 1)
-		initDone = true
-	}
-
 	// Send config to show channel (non-blocking)
 	select {
 	case showChan <- config:
@@ -90,71 +81,109 @@ func Run() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	// Process show requests
-	for config := range showChan {
-		// Create or recreate webview
-		mu.Lock()
+	// Initialize channels if not already done
+	mu.Lock()
+	if showChan == nil {
+		showChan = make(chan *Config, 1)
+	}
+	if quitChan == nil {
+		quitChan = make(chan struct{})
+	}
+	mu.Unlock()
 
-		if isRunning {
-			// Just navigate to new URL
-			logger.Info("Webview already running, navigating")
+	// Process show requests and quit signal
+	for {
+		select {
+		case config := <-showChan:
+			// Create or recreate webview
+			mu.Lock()
+
+			if isRunning {
+				// Just navigate to new URL
+				logger.Info("Webview already running, navigating")
+				webviewInstance.Navigate(config.URL)
+				mu.Unlock()
+				continue
+			}
+
+			logger.Info("Creating new webview instance")
+			webviewInstance = realWebview.New(config.Debug)
+			if webviewInstance == nil {
+				logger.Error("Failed to create webview instance")
+				mu.Unlock()
+				continue
+			}
+
+			// Configure window
+			webviewInstance.SetTitle(config.Title)
+			var hint realWebview.Hint
+			if config.Resizable {
+				hint = realWebview.HintNone
+			} else {
+				hint = realWebview.HintFixed
+			}
+			webviewInstance.SetSize(config.Width, config.Height, hint)
 			webviewInstance.Navigate(config.URL)
+
+			isRunning = true
 			mu.Unlock()
-			continue
-		}
 
-		logger.Info("Creating new webview instance")
-		webviewInstance = realWebview.New(config.Debug)
-		if webviewInstance == nil {
-			logger.Error("Failed to create webview instance")
+			logger.Infof("Webview running: %s", config.URL)
+
+			// Run webview (blocking until terminated)
+			webviewInstance.Run()
+
+			// After Run() returns, cleanup
+			mu.Lock()
+			isRunning = false
+			if webviewInstance != nil {
+				webviewInstance.Destroy()
+				webviewInstance = nil
+			}
 			mu.Unlock()
-			continue
+
+			logger.Info("Webview stopped")
+		case <-quitChan:
+			logger.Info("Webview event loop received quit signal")
+			// Terminate webview if it's running
+			mu.Lock()
+			if isRunning && webviewInstance != nil {
+				logger.Info("Terminating webview from quit signal")
+				webviewInstance.Terminate()
+			}
+			mu.Unlock()
+			return
 		}
-
-		// Configure window
-		webviewInstance.SetTitle(config.Title)
-		var hint realWebview.Hint
-		if config.Resizable {
-			hint = realWebview.HintNone
-		} else {
-			hint = realWebview.HintFixed
-		}
-		webviewInstance.SetSize(config.Width, config.Height, hint)
-		webviewInstance.Navigate(config.URL)
-
-		isRunning = true
-		mu.Unlock()
-
-		logger.Infof("Webview running: %s", config.URL)
-
-		// Run webview (blocking until terminated)
-		webviewInstance.Run()
-
-		// After Run() returns, cleanup
-		mu.Lock()
-		isRunning = false
-		if webviewInstance != nil {
-			webviewInstance.Destroy()
-			webviewInstance = nil
-		}
-		mu.Unlock()
-
-		logger.Info("Webview stopped")
 	}
 }
 
-// Terminate stops the webview
+// Terminate stops the webview and exits the event loop
 func Terminate() {
 	mu.Lock()
-	defer mu.Unlock()
 
-	if !isRunning || webviewInstance == nil {
-		logger.Warn("Cannot terminate: webview is not running")
+	// If quit channel is not initialized, create it
+	if quitChan == nil {
+		quitChan = make(chan struct{})
+	}
+
+	// Check if webview is running
+	if isRunning && webviewInstance != nil {
+		logger.Info("Terminating webview")
+		webviewInstance.Terminate()
+		mu.Unlock()
 		return
 	}
 
-	logger.Info("Terminating webview")
-	webviewInstance.Terminate()
+	// If webview is not running, just signal quit to exit the event loop
+	mu.Unlock()
+
+	logger.Info("Webview not running, sending quit signal to event loop")
+	select {
+	case quitChan <- struct{}{}:
+		logger.Info("Quit signal sent successfully")
+	default:
+		logger.Warn("Quit channel is busy or not ready")
+	}
 }
 
 // SetTitle changes the window title
