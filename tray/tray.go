@@ -27,6 +27,11 @@ var (
 
 // Start initializes and starts the system tray icon
 func Start(config *Config) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Errorf("PANIC in tray Start: %v", rec)
+		}
+	}()
 	runtime.LockOSThread()
 	trayConfig = config
 	systray.Run(onReady, onExit)
@@ -143,22 +148,36 @@ func openWebview(port string) {
 
 // updateTooltip updates the tooltip with current music status
 func updateTooltip() {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Errorf("PANIC in updateTooltip: %v", rec)
+		}
+	}()
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		status := music.GetGlobalStatus("netease")
-		var tooltip string
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.Errorf("PANIC in tooltip tick: %v", rec)
+				}
+			}()
 
-		if status.Status.Status == "Playing" || status.Status.Status == "Paused" {
-			tooltip = status.Status.Title + " - " + status.Status.Artist
-			if status.Status.Status == "Paused" {
-				tooltip += " [已暂停]"
+			status := music.GetGlobalStatus("netease")
+			var tooltip string
+
+			if status.Status.Status == "Playing" || status.Status.Status == "Paused" {
+				tooltip = status.Status.Title + " - " + status.Status.Artist
+				if status.Status.Status == "Paused" {
+					tooltip += " [已暂停]"
+				}
+			} else {
+				tooltip = "未在播放音乐"
 			}
-		} else {
-			tooltip = "未在播放音乐"
-		}
 
-		systray.SetTooltip(tooltip)
+			systray.SetTooltip(tooltip)
+		}()
 	}
 }
