@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/newton-miku/now-playing-service-go/foreground"
 	"github.com/newton-miku/now-playing-service-go/logger"
 	"github.com/newton-miku/now-playing-service-go/music"
 	"github.com/newton-miku/now-playing-service-go/settings"
+	"github.com/newton-miku/now-playing-service-go/tools"
+	"github.com/newton-miku/now-playing-service-go/utils"
 )
 
 // Server represents the HTTP server configuration
@@ -48,8 +51,10 @@ func (s *Server) Start() error {
 
 // registerHandlers registers all HTTP handlers
 func (s *Server) registerHandlers() {
-	logger.Debug("Registering static file handler")
-	// Static files
+	logger.Debug("Registering static file handlers")
+	// Static files - CSS, JS, and legacy static directory
+	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir("web/css"))))
+	http.Handle("/js/", http.StripPrefix("/js/", http.FileServer(http.Dir("web/js"))))
 	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
 
 	logger.Debug("Registering API endpoints")
@@ -63,6 +68,8 @@ func (s *Server) registerHandlers() {
 	http.HandleFunc("/api/logs", s.logsHandler)
 	http.HandleFunc("/api/logs/stream", s.logsStreamHandler)
 	http.HandleFunc("/api/logs/level", s.logsLevelHandler)
+	http.HandleFunc("/api/version", s.versionHandler)
+	http.HandleFunc("/api/open-external", s.openExternalHandler)
 	http.HandleFunc("/", s.webUIHandler)
 
 	logger.Info("All HTTP handlers registered successfully")
@@ -269,4 +276,47 @@ func (s *Server) logsLevelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// versionHandler handles version information requests
+func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	response := map[string]string{
+		"version":   tools.Version,
+		"buildTime": tools.BuildTime,
+		"goVersion": runtime.Version(),
+		"platform":  runtime.GOOS + "/" + runtime.GOARCH,
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+// openExternalHandler opens URL in system default browser
+func (s *Server) openExternalHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		http.Error(w, "URL is required", http.StatusBadRequest)
+		return
+	}
+
+	logger.Infof("Opening external URL: %s", req.URL)
+	if err := utils.OpenURL(req.URL); err != nil {
+		logger.Errorf("Failed to open URL: %v", err)
+		http.Error(w, "Failed to open URL", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }

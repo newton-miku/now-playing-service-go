@@ -12,7 +12,11 @@ import (
 // OpenBrowser opens the web UI in the default browser
 func OpenBrowser(port string) {
 	url := fmt.Sprintf("http://localhost:%s", port)
+	OpenURL(url)
+}
 
+// OpenURL opens any URL in the default browser
+func OpenURL(url string) error {
 	var err error
 	switch runtime.GOOS {
 	case "windows":
@@ -22,10 +26,7 @@ func OpenBrowser(port string) {
 	default:
 		err = exec.Command("xdg-open", url).Start()
 	}
-
-	if err != nil {
-		fmt.Printf("无法打开浏览器: %v\n", err)
-	}
+	return err
 }
 
 // PrintStatus prints the music status to console
