@@ -160,7 +160,11 @@ func (r *Reporter) StartWithSMTCPreference(preferredPlatform string, smtcPreferr
 	r.mu.Unlock()
 
 	go func() {
+		// Panic recovery to prevent program crash
 		defer func() {
+			if rec := recover(); rec != nil {
+				logger.Errorf("PANIC in reporter goroutine: %v", rec)
+			}
 			r.mu.Lock()
 			if r.ticker != nil {
 				r.ticker.Stop()
@@ -171,10 +175,17 @@ func (r *Reporter) StartWithSMTCPreference(preferredPlatform string, smtcPreferr
 		for {
 			select {
 			case <-r.ticker.C:
-				status := music.GetGlobalStatusSMTCPreferred(preferredPlatform, smtcPreferred)
-				if err := r.Report(status); err != nil {
-					logger.Debugf("Failed to report: %v", err)
-				}
+				func() {
+					defer func() {
+						if rec := recover(); rec != nil {
+							logger.Errorf("PANIC in reporter tick: %v", rec)
+						}
+					}()
+					status := music.GetGlobalStatusSMTCPreferred(preferredPlatform, smtcPreferred)
+					if err := r.Report(status); err != nil {
+						logger.Debugf("Failed to report: %v", err)
+					}
+				}()
 			case <-stopCh:
 				logger.Infof("Reporter stopped for device: %s", r.config.DeviceID)
 				return
