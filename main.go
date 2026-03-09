@@ -198,6 +198,12 @@ func startDeviceReporter(serverURL, deviceID, deviceName, apiKey string, interva
 
 // startDeviceReporterWithSMTC starts the device status reporter with SMTC preference
 func startDeviceReporterWithSMTC(serverURL, deviceID, deviceName, apiKey string, interval int, preferred string, smtcPreferred bool) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Errorf("PANIC in startDeviceReporterWithSMTC: %v", rec)
+		}
+	}()
+
 	reporterMutex.Lock()
 	defer reporterMutex.Unlock()
 
@@ -260,6 +266,11 @@ func runServerMode(preferred, portStr string, noTray bool, singlePlatform string
 
 	// Start server in goroutine
 	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.Errorf("PANIC in HTTP server: %v", rec)
+			}
+		}()
 		logger.Infof("Starting HTTP server on port %s", portStr)
 		if err := srv.Start(); err != nil {
 			logger.Error("HTTP server error:", err)
@@ -296,14 +307,26 @@ func runServerMode(preferred, portStr string, noTray bool, singlePlatform string
 			},
 		}
 
-		// Run tray in goroutine
+		// IMPORTANT: systray must run on main thread, not in goroutine
+		// Delay tray start to ensure webview event loop is ready
 		go func() {
+			// Wait for webview to be initialized
+			time.Sleep(1 * time.Second)
+			logger.Info("Starting tray in background thread (will migrate to main)")
 			tray.Start(trayConfig)
 		}()
 	}
 
 	// Run webview event loop (blocking, must be on main thread)
-	logger.Info("Starting webview event loop")
+	logger.Info("Starting webview event loop (main thread)")
+	// Add panic recovery for the main event loop
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("PANIC in main event loop: %v", r)
+			// Restart webview after panic
+			time.Sleep(1 * time.Second)
+		}
+	}()
 	webview.Run()
 
 	logger.Info("Application exiting")
