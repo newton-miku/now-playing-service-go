@@ -4,6 +4,7 @@ package tray
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -49,17 +50,26 @@ func onReady() {
 	systray.SetTitle(trayConfig.Title)
 	systray.SetTooltip(trayConfig.Title)
 
-	// Try to load icon
-	iconData, err := os.ReadFile("ico/icon.ico")
+	// Get executable directory for icon path
+	exePath, err := os.Executable()
+	if err != nil {
+		logger.Errorf("Tray: Failed to get executable path: %v", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	// Try to load icon from executable directory
+	iconPath := filepath.Join(exeDir, "ico", "icon.ico")
+	iconData, err := os.ReadFile(iconPath)
 	if err == nil {
 		systray.SetIcon(iconData)
 	} else {
 		// Try fallback to png if ico fails
-		iconData, err = os.ReadFile("ico/icon.png")
+		iconPath = filepath.Join(exeDir, "ico", "icon.png")
+		iconData, err = os.ReadFile(iconPath)
 		if err == nil {
 			systray.SetIcon(iconData)
 		} else {
-			logger.Warnf("Tray: Could not load icon: %v", err)
+			logger.Warnf("Tray: Could not load icon from %s: %v", iconPath, err)
 		}
 	}
 

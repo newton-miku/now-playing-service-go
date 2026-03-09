@@ -49,13 +49,28 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(addr, nil)
 }
 
+// getWebDir returns the web directory path based on executable location
+func getWebDir() string {
+	exePath, err := os.Executable()
+	if err != nil {
+		logger.Errorf("Failed to get executable path: %v", err)
+		return "web"
+	}
+	return filepath.Join(filepath.Dir(exePath), "web")
+}
+
 // registerHandlers registers all HTTP handlers
 func (s *Server) registerHandlers() {
 	logger.Debug("Registering static file handlers")
+
+	// Get web directory based on executable location
+	webDir := getWebDir()
+	logger.Infof("Web directory: %s", webDir)
+
 	// Static files - CSS, JS, and legacy static directory
-	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir("web/css"))))
-	http.Handle("/js/", http.StripPrefix("/js/", http.FileServer(http.Dir("web/js"))))
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	http.Handle("/css/", http.StripPrefix("/css/", http.FileServer(http.Dir(filepath.Join(webDir, "css")))))
+	http.Handle("/js/", http.StripPrefix("/js/", http.FileServer(http.Dir(filepath.Join(webDir, "js")))))
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(webDir, "static")))))
 
 	logger.Debug("Registering API endpoints")
 	// API endpoints
@@ -177,13 +192,8 @@ func (s *Server) settingsHandler(w http.ResponseWriter, r *http.Request) {
 
 // webUIHandler handles web UI requests
 func (s *Server) webUIHandler(w http.ResponseWriter, r *http.Request) {
-	webDir, err := os.Getwd()
-	if err != nil {
-		logger.Errorf("Failed to get working directory for web UI: %v", err)
-		http.Error(w, "Failed to get working directory", http.StatusInternalServerError)
-		return
-	}
-	htmlPath := filepath.Join(webDir, "web", "index.html")
+	webDir := getWebDir()
+	htmlPath := filepath.Join(webDir, "index.html")
 
 	if _, err := os.Stat(htmlPath); os.IsNotExist(err) {
 		logger.Errorf("Web UI file not found at: %s", htmlPath)
