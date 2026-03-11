@@ -240,6 +240,28 @@ func logf(level int, format string, v ...interface{}) {
 		return
 	}
 
+	// Check log size and rotate if needed before writing
+	if logFile != nil {
+		info, err := logFile.Stat()
+		if err == nil && info.Size() > maxLogSize {
+			// Rotate logs
+			rotateLogs()
+			// Reopen log file
+			logFile.Close()
+			logFile, err = openLogFileWithShareMode(logPath)
+			if err != nil {
+				fmt.Printf("Failed to reopen log file after rotation: %v\n", err)
+				return
+			}
+			// Update logger writer
+			var writer io.Writer = logFile
+			if !isGUIApp() {
+				writer = io.MultiWriter(os.Stdout, logFile)
+			}
+			logger.SetOutput(writer)
+		}
+	}
+
 	prefix := fmt.Sprintf("[%s] ", levelNames[level])
 	logger.Output(3, prefix+message)
 

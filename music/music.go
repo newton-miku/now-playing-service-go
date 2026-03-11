@@ -146,6 +146,12 @@ func waitForAsyncOperation(asyncOp *foundation.IAsyncOperation, timeout time.Dur
 
 // GetSMTCStatus gets music status using SMTC (System Media Transport Controls)
 func GetSMTCStatus() *Status {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Errorf("PANIC in GetSMTCStatus: %v", rec)
+		}
+	}()
+
 	logger.Debug("GetSMTCStatus: Starting...")
 
 	// 尝试初始化为单线程单元（STA）- WinRT通常需要STA
@@ -257,6 +263,12 @@ func GetSMTCStatus() *Status {
 }
 
 func handleSession(session *control.GlobalSystemMediaTransportControlsSession) *Status {
+	defer func() {
+		if rec := recover(); rec != nil {
+			logger.Errorf("PANIC in handleSession: %v", rec)
+		}
+	}()
+
 	playbackInfo, err := session.GetPlaybackInfo()
 	if err != nil || playbackInfo == nil {
 		logger.Debugf("handleSession: GetPlaybackInfo failed: %v", err)

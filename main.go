@@ -26,6 +26,16 @@ var (
 )
 
 func main() {
+	// Top-level panic catcher as last resort
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Printf("FATAL PANIC IN MAIN: %v\n", rec)
+			// Sleep a bit to let logs flush before exit
+			time.Sleep(1 * time.Second)
+			os.Exit(1)
+		}
+	}()
+
 	// Initialize logger first
 	if err := logger.Init("now-playing-service-go"); err != nil {
 		fmt.Printf("Warning: Could not initialize logger: %v\n", err)
@@ -338,20 +348,29 @@ func runConsoleMode(preferred string, smtcPreferred bool) {
 	var prevStatus *music.StatusWithMethod
 
 	for {
-		status := music.GetGlobalStatusSMTCPreferred(preferred, smtcPreferred)
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.Errorf("PANIC in console mode loop: %v", rec)
+					time.Sleep(1 * time.Second)
+				}
+			}()
 
-		// Only print when status changes
-		if prevStatus == nil ||
-			status.Status.Status != prevStatus.Status.Status ||
-			status.Status.Title != prevStatus.Status.Title ||
-			status.Status.Artist != prevStatus.Status.Artist {
-			utils.PrintStatus(&status.Status)
-			if status.Status.Status == "Playing" {
-				logger.Infof("Now playing: %s - %s", status.Status.Title, status.Status.Artist)
+			status := music.GetGlobalStatusSMTCPreferred(preferred, smtcPreferred)
+
+			// Only print when status changes
+			if prevStatus == nil ||
+				status.Status.Status != prevStatus.Status.Status ||
+				status.Status.Title != prevStatus.Status.Title ||
+				status.Status.Artist != prevStatus.Status.Artist {
+				utils.PrintStatus(&status.Status)
+				if status.Status.Status == "Playing" {
+					logger.Infof("Now playing: %s - %s", status.Status.Title, status.Status.Artist)
+				}
 			}
-		}
 
-		prevStatus = status
-		time.Sleep(100 * time.Millisecond)
+			prevStatus = status
+			time.Sleep(100 * time.Millisecond)
+		}()
 	}
 }
